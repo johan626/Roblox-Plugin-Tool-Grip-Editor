@@ -9,42 +9,62 @@ local Project = Modules.Parent
 local ToolEditor = {}
 ToolEditor.__index = ToolEditor
 
-function ToolEditor.new()
-	local hDesc = Instance.new("HumanoidDescription")
-	local gray = BrickColor.new(-1).Color
-
-	for _,limb in pairs(Enum.BodyPart:GetEnumItems()) do
-		hDesc[limb.Name .. "Color"] = gray
+function ToolEditor:_createNewDummy(rigType)
+	if self.Dummy then
+		self.Dummy:Destroy()
 	end
 
-	local dummy = Players:CreateHumanoidModelFromDescription(hDesc, "R15")
+	local hDesc
+	if rigType == "R15" and self.ActiveHumanoidDescription then
+		hDesc = self.ActiveHumanoidDescription
+	else -- For R6, or initial R15 creation, use a plain description
+		hDesc = Instance.new("HumanoidDescription")
+		local gray = BrickColor.new(-1).Color
+		for _,limb in pairs(Enum.BodyPart:GetEnumItems()) do
+			hDesc[limb.Name .. "Color"] = gray
+		end
+	end
+
+	local dummy = Players:CreateHumanoidModelFromDescription(hDesc, rigType)
 	local humanoid = dummy:WaitForChild("Humanoid")
 
 	-- Avoid unintended script injection.
-	local animate = dummy:WaitForChild("Animate")
-	animate:Destroy()
+	if dummy:FindFirstChild("Animate") then
+		dummy.Animate:Destroy()
+	end
 
 	local animator = Instance.new("Animator")
 	animator.Parent = humanoid
 
-	local worldModel = Instance.new("WorldModel")
+	local worldModel = self.WorldModel
+	if not worldModel then
+		worldModel = Instance.new("WorldModel")
+		self.WorldModel = worldModel
+	end
 	dummy.Parent = worldModel
 
 	local rootPart = humanoid.RootPart
 	rootPart.Anchored = true
 
+	self.Dummy = dummy
+	self.Humanoid = humanoid
+	self.RootPart = rootPart
+	self.Animator = animator
+
+	self:StartAnimations()
+end
+
+function ToolEditor.new()
 	local editor = 
 		{
-			Dummy = dummy;
-
-			Humanoid = humanoid;
-			RootPart = rootPart;
-
-			Animator = animator;
-			WorldModel = worldModel;
+			RigType = "R15",
+			ActiveHumanoidDescription = nil,
+			ZoomMultiplier = 1,
 		}
 
-	return setmetatable(editor, ToolEditor)
+	setmetatable(editor, ToolEditor)
+	editor:_createNewDummy("R15")
+	return editor
 end
 
 function ToolEditor:SetParent(parent)
@@ -75,14 +95,23 @@ end
 
 function ToolEditor:GetCameraZoom()
 	local handle = self.Handle
+	local baseZoom
 
 	if handle then
 		local size = handle.Size
-		return math.max(4, size.Magnitude * 1.5)
+		baseZoom = math.max(4, size.Magnitude * 1.5)
+	else
+		local cf, size = self.Dummy:GetBoundingBox()
+		baseZoom = size.Magnitude
 	end
 
-	local cf, size = self.Dummy:GetBoundingBox()
-	return size.Magnitude
+	return baseZoom * self.ZoomMultiplier
+end
+
+function ToolEditor:AdjustZoom(scrollDelta)
+	local currentMultiplier = self.ZoomMultiplier
+	local newMultiplier = currentMultiplier - (scrollDelta * 0.1)
+	self.ZoomMultiplier = math.clamp(newMultiplier, 0.5, 2)
 end
 
 function ToolEditor:StepAnimator(delta)
@@ -91,22 +120,83 @@ function ToolEditor:StepAnimator(delta)
 end
 
 function ToolEditor:ApplyDescription(hDesc)
-	local humanoid = self.Humanoid
-	humanoid:ApplyDescription(hDesc)
+	self.ActiveHumanoidDescription = hDesc
+	-- Only R15 rigs can have descriptions applied in this way.
+	if self.RigType == "R15" then
+		local humanoid = self.Humanoid
+		humanoid:ApplyDescription(hDesc)
+	end
+end
+
+function ToolEditor:SwitchRigType()
+	local currentTool = self.Tool
+	self:ClearTool()
+
+	local newRigType = (self.RigType == "R15") and "R6" or "R15"
+	self.RigType = newRigType
+
+	self:_createNewDummy(newRigType)
+
+	if currentTool then
+		self:BindTool(currentTool)
+	end
+
+	return newRigType
 end
 
 function ToolEditor:StartAnimations()
-	local anims = Project.Animations
+	local anims = Project:WaitForChild("Animation")[self.RigType]
 	local animator = self.Animator
 
 	for _,track in pairs(animator:GetPlayingAnimationTracks()) do
 		track:Stop()
 	end
 
+	self.CustomAnimationTrack = nil
+
 	for _,animDef in pairs(anims:GetChildren()) do
 		local anim = UI.create(require(animDef))
 		local track = animator:LoadAnimation(anim)
 		track:Play()
+	end
+end
+
+function ToolEditor:PlayAnimation(animationId)
+	self:StopCustomAnimation()
+
+	local animator = self.Animator
+	local success, animation = pcall(function()
+		local anim = Instance.new("Animation")
+		anim.AnimationId = animationId
+		return anim
+	end)
+
+	if not success then
+		return false, "Invalid AnimationId format"
+	end
+
+	local loaded, track = pcall(function()
+		return animator:LoadAnimation(animation)
+	end)
+
+	animation:Destroy()
+
+	if not loaded then
+		return false, "Failed to load animation. Check permissions and ID."
+	end
+
+	self.CustomAnimationTrack = track
+	track.Looped = true
+	track:Play()
+
+	return true
+end
+
+function ToolEditor:StopCustomAnimation()
+	if self.CustomAnimationTrack then
+		self.CustomAnimationTrack:Stop()
+		self.CustomAnimationTrack:Destroy()
+		self.CustomAnimationTrack = nil
 	end
 end
 
@@ -162,11 +252,14 @@ function ToolEditor:ClearTool()
 		self.GripEditor = nil
 	end
 
+	self:StopCustomAnimation()
+
 	if self.RightGrip then
 		self.RightGrip.Part1 = nil
 	end
 
 	self.Tool = nil
+	self.ZoomMultiplier = 1
 end
 
 function ToolEditor:CreateGhostArm()
@@ -218,7 +311,8 @@ function ToolEditor:BindTool(tool)
 		return
 	end
 
-	local rightHand = self:FindLimb("RightHand")
+	local part0Name = (self.RigType == "R15") and "RightHand" or "Right Arm"
+	local rightHand = self:FindLimb(part0Name)
 	local rightGrip = self.RightGrip
 
 	if not (rightGrip and rightGrip:IsDescendantOf(dummy)) then

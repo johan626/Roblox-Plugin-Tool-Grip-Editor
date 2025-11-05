@@ -73,6 +73,12 @@ vpFrame.Parent = preview
 local editButton = UI.create(require(uiDefs["EditButton.model"]))
 editButton.Parent = preview
 
+local liveSyncButton = UI.create(require(uiDefs["LiveSyncButton.model"]))
+liveSyncButton.Parent = preview
+
+local animationPreview = UI.create(require(uiDefs["AnimationPreview.model"]))
+animationPreview.Parent = preview
+
 local selectATool = UI.create(require(uiDefs["SelectATool.model"]))
 selectATool.Parent = preview
 
@@ -336,6 +342,11 @@ local function onSelectionChanged()
 	local mounted = editor:BindTool(tool)
 	selectATool.Visible = (not mounted)
 	editButton.Visible = mounted
+	liveSyncButton.Visible = mounted
+	animationPreview.Visible = mounted
+
+	-- Reset button style on new selection, since sync is always off initially
+	liveSyncButton.Style = Enum.ButtonStyle.RobloxRoundButton
 end
 
 local function onEditActivated()
@@ -355,6 +366,34 @@ end
 
 editButton.Activated:Connect(onEditActivated)
 Selection.SelectionChanged:Connect(onSelectionChanged)
+
+liveSyncButton.Activated:Connect(function()
+	local isActive = editor:ToggleLiveSync()
+	if isActive then
+		liveSyncButton.Style = Enum.ButtonStyle.RobloxRoundDefaultButton
+	else
+		liveSyncButton.Style = Enum.ButtonStyle.RobloxRoundButton
+	end
+end)
+
+do
+	local animInput = animationPreview:FindFirstChild("AnimIdInput")
+	local playButton = animationPreview:FindFirstChild("PlayButton")
+	local stopButton = animationPreview:FindFirstChild("StopButton")
+
+	playButton.Activated:Connect(function()
+		local animId = animInput.Text
+		if animId and animId ~= "" then
+			editor:PlayAnimation(animId)
+		else
+			warn("Animation ID is empty!")
+		end
+	end)
+
+	stopButton.Activated:Connect(function()
+		editor:StopCustomAnimation()
+	end)
+end
 
 ------------------------------------------------------------------------------------------------------
 -- Buttons

@@ -60,6 +60,10 @@ function ToolEditor.new()
 			RigType = "R15",
 			ActiveHumanoidDescription = nil,
 			ZoomMultiplier = 1,
+
+			IsLiveSyncActive = false,
+			SyncedTool = nil,
+			PlayerAddedConnection = nil,
 		}
 
 	setmetatable(editor, ToolEditor)
@@ -198,6 +202,9 @@ function ToolEditor:StopCustomAnimation()
 		self.CustomAnimationTrack:Destroy()
 		self.CustomAnimationTrack = nil
 	end
+
+	-- Restart the default animations
+	self:StartAnimations()
 end
 
 function ToolEditor:Connect(name, event)
@@ -231,17 +238,176 @@ function ToolEditor:ReflectGrip()
 		tool.Grip = newCFrame
 
 		-- Live Sync Communication
-		pcall(function()
-			local folderName = "ToolGripEditor_Sync_" .. tool:GetFullName()
-			local syncFolder = game:GetService("CoreGui"):FindFirstChild(folderName)
-			if syncFolder then
-				syncFolder.GripCFrame.Value = newCFrame
-			end
-		end)
+		if self.IsLiveSyncActive and self.SyncedTool == tool then
+			pcall(function()
+				local folderName = "ToolGripEditor_Sync_" .. tool:GetFullName()
+				local syncFolder = game:GetService("CoreGui"):FindFirstChild(folderName)
+				if syncFolder then
+					syncFolder.GripCFrame.Value = newCFrame
+				end
+			end)
+		end
 	end
 end
 
+function ToolEditor:InjectClientScript(player, tool)
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then
+		return
+	end
+
+	local playerScripts = player:FindFirstChild("PlayerScripts")
+	if not playerScripts then
+		return
+	end
+
+	local SCRIPT_NAME = "ToolGripEditor_LiveSync"
+	if playerScripts:FindFirstChild(SCRIPT_NAME) then
+		return -- Already injected
+	end
+
+	local folderName = "ToolGripEditor_Sync_" .. tool:GetFullName()
+	local syncFolder = Instance.new("Folder")
+	syncFolder.Name = folderName
+	syncFolder.Parent = game:GetService("CoreGui")
+
+	local cframeValue = Instance.new("CFrameValue")
+	cframeValue.Name = "GripCFrame"
+	cframeValue.Value = tool.Grip
+	cframeValue.Parent = syncFolder
+
+	-- The client script will be added in the next step.
+	-- For now, this is a placeholder.
+	local clientScript = Instance.new("LocalScript")
+	clientScript.Name = SCRIPT_NAME
+
+	local clientScriptSource = [[
+		local Players = game:GetService("Players")
+		local CoreGui = game:GetService("CoreGui")
+
+		local localPlayer = Players.LocalPlayer
+
+		local SYNC_FOLDER_NAME = %q
+		local TOOL_NAME = %q
+
+		local syncFolder = CoreGui:WaitForChild(SYNC_FOLDER_NAME)
+		if not syncFolder then return end
+
+		local gripCFrameValue = syncFolder:WaitForChild("GripCFrame")
+		if not gripCFrameValue then return end
+
+		local function findToolInCharacter(character)
+			if not character then return nil end
+			return character:FindFirstChild(TOOL_NAME)
+		end
+
+		local function onGripChanged(newGrip)
+			local character = localPlayer.Character
+			if not character then return end
+
+			local tool = findToolInCharacter(character)
+			if tool and tool:IsA("Tool") then
+				tool.Grip = newGrip
+			end
+		end
+
+		local function onCharacterAdded(character)
+			-- Wait for the tool to be equipped/added
+			character.ChildAdded:Connect(function(child)
+				if child:IsA("Tool") and child.Name == TOOL_NAME then
+					-- Set the initial grip value immediately
+					child.Grip = gripCFrameValue.Value
+				end
+			end)
+
+			-- Check if tool is already there
+			local tool = findToolInCharacter(character)
+			if tool and tool:IsA("Tool") then
+				 tool.Grip = gripCFrameValue.Value
+			end
+		end
+
+		-- Initial setup
+		if localPlayer.Character then
+			onCharacterAdded(localPlayer.Character)
+		end
+
+		-- Connect events
+		gripCFrameValue.Changed:Connect(onGripChanged)
+		localPlayer.CharacterAdded:Connect(onCharacterAdded)
+	]]
+
+	clientScript.Source = string.format(clientScriptSource, folderName, tool.Name)
+	clientScript.Parent = playerScripts
+end
+
+function ToolEditor:CleanupClientScript(player, tool)
+	if player then
+		local playerScripts = player:FindFirstChild("PlayerScripts")
+		if playerScripts then
+			local SCRIPT_NAME = "ToolGripEditor_LiveSync"
+			local script = playerScripts:FindFirstChild(SCRIPT_NAME)
+			if script then
+				script:Destroy()
+			end
+		end
+	end
+
+	if tool then
+		local folderName = "ToolGripEditor_Sync_" .. tool:GetFullName()
+		local syncFolder = game:GetService("CoreGui"):FindFirstChild(folderName)
+		if syncFolder then
+			syncFolder:Destroy()
+		end
+	end
+end
+
+function ToolEditor:ToggleLiveSync()
+	if not self.Tool then
+		warn("Cannot toggle Live Sync without a tool selected.")
+		return false
+	end
+
+	self.IsLiveSyncActive = not self.IsLiveSyncActive
+
+	if self.IsLiveSyncActive then
+		self.SyncedTool = self.Tool
+
+		-- Inject for existing players
+		for _, player in pairs(Players:GetPlayers()) do
+			self:InjectClientScript(player, self.SyncedTool)
+		end
+
+		-- Listen for new players
+		self.PlayerAddedConnection = Players.PlayerAdded:Connect(function(player)
+			self:InjectClientScript(player, self.SyncedTool)
+		end)
+
+	else
+		-- Cleanup for all players
+		for _, player in pairs(Players:GetPlayers()) do
+			self:CleanupClientScript(player, self.SyncedTool)
+		end
+
+		-- Stop listening for new players
+		if self.PlayerAddedConnection then
+			self.PlayerAddedConnection:Disconnect()
+			self.PlayerAddedConnection = nil
+		end
+
+		self:CleanupClientScript(nil, self.SyncedTool) -- Cleanup CoreGui folder
+		self.SyncedTool = nil
+	end
+
+	return self.IsLiveSyncActive
+end
+
+
 function ToolEditor:ClearTool()
+	if self.IsLiveSyncActive then
+		self:ToggleLiveSync() -- Turn it off
+	end
+
 	if self.GripRefresh then
 		self.GripRefresh:Disconnect()
 		self.GripRefresh = nil

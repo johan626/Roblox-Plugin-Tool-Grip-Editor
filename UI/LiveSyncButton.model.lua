@@ -2,14 +2,13 @@ return {
 	ClassName = "TextButton",
 
 	Properties = {
-		Name = "LiveSyncButton",
 		Text = "Live Sync",
 		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -65), -- Positioned below the "Edit Grip" button
+		Position = UDim2.new(0.5, 0, 1, -70), -- Position it above the edit button
 		Size = UDim2.new(1, -50, 0, 40),
 
 		Font = Enum.Font.SourceSansSemibold,
-		Style = Enum.ButtonStyle.RobloxRoundDefaultButton,
+		Style = Enum.ButtonStyle.RobloxRoundButton, -- Default non-active style
 
 		TextSize = 24,
 		TextColor3 = Color3.new(1, 1, 1),

@@ -1,55 +1,58 @@
 return {
 	ClassName = "Frame",
-
 	Properties = {
 		Name = "AnimationPreview",
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, 0, 1, -70),
-		Size = UDim2.new(1, -50, 0, 40),
+		Size = UDim2.new(1, 0, 0, 50),
+		Position = UDim2.new(0, 0, 0, 20),
 		BackgroundTransparency = 1,
-
-		Visible = false,
-		ZIndex = 10,
+		Visible = false, -- Initially hidden
+		ZIndex = 2,
 	},
-
 	Children = {
+		{
+			ClassName = "UIListLayout",
+			Properties = {
+				FillDirection = Enum.FillDirection.Horizontal,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 5),
+			},
+		},
 		{
 			ClassName = "TextBox",
 			Properties = {
 				Name = "AnimIdInput",
-				Text = "rbxassetid://",
-				AnchorPoint = Vector2.new(0, 0.5),
-				Position = UDim2.new(0, 0, 0.5, 0),
-				Size = UDim2.new(1, -90, 1, 0),
-
+				LayoutOrder = 1,
+				Text = "",
+				PlaceholderText = "rbxassetid://...",
+				Size = UDim2.new(0.7, -10, 1, 0),
 				Font = Enum.Font.SourceSans,
 				TextSize = 18,
-				TextColor3 = Color3.new(1, 1, 1),
+				ClearTextOnFocus = false,
 			},
 		},
 		{
 			ClassName = "TextButton",
 			Properties = {
 				Name = "PlayButton",
+				LayoutOrder = 2,
 				Text = "Play",
-				AnchorPoint = Vector2.new(1, 0.5),
-				Position = UDim2.new(1, 0, 0.5, 0),
-				Size = UDim2.new(0, 80, 1, 0),
-
+				Size = UDim2.new(0.15, 0, 1, 0),
 				Font = Enum.Font.SourceSansSemibold,
+				TextSize = 18,
 				Style = Enum.ButtonStyle.RobloxRoundDefaultButton,
-
-				TextSize = 20,
-				TextColor3 = Color3.new(1, 1, 1),
 			},
 		},
 		{
-			Name = "SizeCap",
-			ClassName = "UISizeConstraint",
-
+			ClassName = "TextButton",
 			Properties = {
-				MaxSize = Vector2.new(300, 40)
-			}
+				Name = "StopButton",
+				LayoutOrder = 3,
+				Text = "Stop",
+				Size = UDim2.new(0.15, 0, 1, 0),
+				Font = Enum.Font.SourceSansSemibold,
+				TextSize = 18,
+				Style = Enum.ButtonStyle.RobloxRoundButton,
+			},
 		},
 	}
 }

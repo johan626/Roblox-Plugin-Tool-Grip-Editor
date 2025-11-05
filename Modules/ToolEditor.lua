@@ -145,7 +145,7 @@ function ToolEditor:SwitchRigType()
 end
 
 function ToolEditor:StartAnimations()
-	local anims = Project:WaitForChild("Animation")[self.RigType]
+	local anims = Project:WaitForChild("Animations")[self.RigType]
 	local animator = self.Animator
 
 	for _,track in pairs(animator:GetPlayingAnimationTracks()) do

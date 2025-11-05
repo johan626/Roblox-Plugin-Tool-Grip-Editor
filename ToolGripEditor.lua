@@ -178,6 +178,8 @@ updateTheme()
 editor:SetParent(vpFrame)
 editor:StartAnimations()
 
+loadUserAvatar()
+
 Studio.ThemeChanged:Connect(updateTheme)
 RunService.Heartbeat:Connect(updateWindow)
 
@@ -269,6 +271,43 @@ end
 
 input.FocusLost:Connect(onFocusLost)
 inputSink.InputBegan:Connect(onInputBegan)
+
+local function loadUserAvatar()
+	local userId
+
+	local success, studioService = pcall(function()
+		return game:GetService("StudioService")
+	end)
+
+	if success and studioService then
+		local gotId, id = pcall(function()
+			return studioService:GetUserId()
+		end)
+		if gotId then
+			userId = id
+		end
+	end
+
+	if not userId then
+		warn("Tool Grip Editor: Could not automatically determine the user's ID to load their avatar.")
+		return
+	end
+
+	-- Now, load the description.
+	warn("Tool Grip Editor: Loading avatar for user ID:", userId)
+
+	local gotDesc, hDesc = pcall(function ()
+		return Players:GetHumanoidDescriptionFromUserId(userId)
+	end)
+
+	if not gotDesc then
+		warn("Tool Grip Editor: Could not get a HumanoidDescription for user ID", userId, "at this time!")
+		return
+	end
+
+	editor:ApplyDescription(hDesc)
+	warn("Tool Grip Editor: Avatar loaded successfully!")
+end
 
 ------------------------------------------------------------------------------------------------------
 -- Tool Mounting

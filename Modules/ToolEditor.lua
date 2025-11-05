@@ -227,7 +227,17 @@ function ToolEditor:ReflectGrip()
 	local gripEditor = self.GripEditor
 
 	if tool and gripEditor then
-		tool.Grip = gripEditor.CFrame
+		local newCFrame = gripEditor.CFrame
+		tool.Grip = newCFrame
+
+		-- Live Sync Communication
+		pcall(function()
+			local folderName = "ToolGripEditor_Sync_" .. tool:GetFullName()
+			local syncFolder = game:GetService("CoreGui"):FindFirstChild(folderName)
+			if syncFolder then
+				syncFolder.GripCFrame.Value = newCFrame
+			end
+		end)
 	end
 end
 
@@ -307,7 +317,7 @@ function ToolEditor:BindTool(tool)
 	local dummy = self.Dummy
 	local handle = tool:FindFirstChild("Handle")
 
-	if not (handle and handle.Archivable and handle:IsA("BasePart")) then
+	if not (handle and handle:IsA("BasePart")) then
 		return
 	end
 
@@ -355,10 +365,6 @@ function ToolEditor:BindTool(tool)
 		end
 
 		if part == handle then
-			continue
-		end
-
-		if not part.Archivable then
 			continue
 		end
 

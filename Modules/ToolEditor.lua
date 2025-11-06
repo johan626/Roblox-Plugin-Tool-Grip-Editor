@@ -54,6 +54,47 @@ function ToolEditor:_createNewDummy(rigType)
 	self:StartAnimations()
 end
 
+function ToolEditor:_generateViewmodelFromDummy()
+	if self.ViewmodelDummy then
+		self.ViewmodelDummy:Destroy()
+	end
+
+	local viewmodelDummy = self.Dummy:Clone()
+	viewmodelDummy.Name = "ViewmodelDummy"
+
+	local humanoid = viewmodelDummy:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return nil end
+
+	local partsToKeep = {
+		-- R15
+		["RightUpperArm"] = true, ["RightLowerArm"] = true, ["RightHand"] = true,
+		["LeftUpperArm"] = true, ["LeftLowerArm"] = true, ["LeftHand"] = true,
+		-- R6
+		["Right Arm"] = true, ["Left Arm"] = true,
+	}
+
+	for _, part in pairs(viewmodelDummy:GetChildren()) do
+		if part:IsA("BasePart") and not partsToKeep[part.Name] then
+			part:Destroy()
+		end
+	end
+
+	-- Also remove any accessories
+	for _, accoutrement in pairs(viewmodelDummy:GetChildren()) do
+		if accoutrement:IsA("Accessory") then
+			accoutrement:Destroy()
+		end
+	end
+
+	local primaryPart = viewmodelDummy:FindFirstChild("RightHand") or viewmodelDummy:FindFirstChild("Right Arm")
+	if primaryPart then
+		viewmodelDummy.PrimaryPart = primaryPart
+	end
+
+	self.ViewmodelDummy = viewmodelDummy
+	return viewmodelDummy
+end
+
 function ToolEditor.new()
 	local editor = 
 		{
@@ -64,11 +105,51 @@ function ToolEditor.new()
 			IsLiveSyncActive = false,
 			SyncedTool = nil,
 			PlayerAddedConnection = nil,
+
+			EditorMode = "Character", -- "Character" or "Viewmodel"
+
+			ProxyHandle = nil,
+			ProxyPart0 = nil,
 		}
 
 	setmetatable(editor, ToolEditor)
 	editor:_createNewDummy("R15")
 	return editor
+end
+
+function ToolEditor:SetEditorMode(newMode)
+	if self.EditorMode == newMode then
+		return
+	end
+
+	self.EditorMode = newMode
+	warn("Editor mode switched to:", newMode)
+
+	if newMode == "Viewmodel" then
+		if not self.ViewmodelDummy then
+			self:_generateViewmodelFromDummy()
+		end
+		self.Dummy.Parent = nil
+		self.ViewmodelDummy.Parent = self.WorldModel
+		self.RootPart = self.ViewmodelDummy.PrimaryPart or self.ViewmodelDummy:FindFirstChild("HumanoidRootPart")
+	else -- Character mode
+		self.Dummy.Parent = self.WorldModel
+		if self.ViewmodelDummy then
+			self.ViewmodelDummy.Parent = nil
+		end
+		self.RootPart = self.Dummy:FindFirstChild("HumanoidRootPart")
+	end
+
+	local currentTool = self.Tool
+	self:ClearTool()
+
+	if currentTool then
+		if newMode == "Viewmodel" then
+			self:BindViewmodelTool(currentTool)
+		else
+			self:BindTool(currentTool)
+		end
+	end
 end
 
 function ToolEditor:SetParent(parent)
@@ -141,8 +222,17 @@ function ToolEditor:SwitchRigType()
 
 	self:_createNewDummy(newRigType)
 
+	if self.ViewmodelDummy then
+		self:_generateViewmodelFromDummy()
+	end
+
 	if currentTool then
-		self:BindTool(currentTool)
+		-- Re-bind based on current mode
+		if self.EditorMode == "Character" then
+			self:BindTool(currentTool)
+		else
+			self:BindViewmodelTool(currentTool)
+		end
 	end
 
 	return newRigType
@@ -247,6 +337,15 @@ function ToolEditor:ReflectGrip()
 				end
 			end)
 		end
+	end
+end
+
+function ToolEditor:ReflectViewmodelGrip()
+	if self.ProxyHandle and self.ProxyPart0 and self.ViewModelWeld then
+		local worldCFrame = self.ProxyHandle.CFrame
+		local part0CFrame = self.ProxyPart0.CFrame
+		local newC1 = part0CFrame:ToObjectSpace(worldCFrame)
+		self.ViewModelWeld.C1 = newC1
 	end
 end
 
@@ -434,6 +533,11 @@ function ToolEditor:ClearTool()
 		self.RightGrip.Part1 = nil
 	end
 
+	if self.ViewModelWeld then
+		self.ViewModelWeld:Destroy()
+		self.ViewModelWeld = nil
+	end
+
 	self.Tool = nil
 	self.ZoomMultiplier = 1
 end
@@ -568,7 +672,59 @@ function ToolEditor:BindTool(tool)
 	return (self.Handle ~= nil)
 end
 
+function ToolEditor:BindViewmodelTool(tool)
+	if tool == nil then
+		self:ClearTool()
+		return false
+	end
+
+	if self.Tool == tool then
+		return true
+	elseif self.Tool ~= nil then
+		self:ClearTool()
+	end
+
+	local handle = tool:FindFirstChild("Handle")
+	if not (handle and handle:IsA("BasePart")) then
+		return
+	end
+
+	local part0Name = (self.RigType == "R15") and "RightHand" or "Right Arm"
+	local rightHand = self.ViewmodelDummy:FindFirstChild(part0Name, true)
+
+	if not rightHand then
+		warn("Could not find right hand for viewmodel!")
+		return false
+	end
+
+	local newHandle = handle:Clone()
+	newHandle.Parent = self.ViewmodelDummy
+
+	local viewModelWeld = Instance.new("Motor6D")
+	viewModelWeld.Name = "ViewModelWeld"
+	viewModelWeld.Part0 = rightHand
+	viewModelWeld.Part1 = newHandle
+
+	local gripAtt = rightHand:FindFirstChild("RightGripAttachment")
+	if gripAtt then
+		viewModelWeld.C0 = gripAtt.CFrame
+	end
+
+	viewModelWeld.Parent = rightHand
+
+	self.Handle = newHandle
+	self.ViewModelWeld = viewModelWeld
+	self.Tool = tool
+
+	return true
+end
+
 function ToolEditor:EditGrip(plugin)
+	if self.EditorMode == "Viewmodel" then
+		self:_editViewmodelGrip(plugin)
+		return
+	end
+
 	local tool = self.Tool
 	local handle = self.Handle
 
@@ -652,6 +808,75 @@ function ToolEditor:EditGrip(plugin)
 		ChangeHistoryService:SetWaypoint("End Grip Edit")
 		editor:Destroy()
 	end
+end
+
+function ToolEditor:_editViewmodelGrip(plugin)
+	local tool = self.Tool
+	local handle = self.Handle
+	local viewModelWeld = self.ViewModelWeld
+
+	if not (tool and handle and viewModelWeld) then
+		return
+	end
+
+	local editorModel = Instance.new("Model")
+	editorModel.Name = "Viewmodel Grip Editor"
+	editorModel.Archivable = false
+
+	local rightHand = viewModelWeld.Part0:Clone()
+	rightHand.Parent = editorModel
+
+	local handleProxy = handle:Clone()
+	handleProxy.Parent = editorModel
+
+	local weldProxy = Instance.new("Motor6D")
+	weldProxy.Name = "ViewModelWeld"
+	weldProxy.Part0 = rightHand
+	weldProxy.Part1 = handleProxy
+	weldProxy.C0 = viewModelWeld.C0
+	weldProxy.C1 = viewModelWeld.C1
+	weldProxy.Parent = rightHand
+
+	editorModel.PrimaryPart = handleProxy
+	editorModel:SetPrimaryPartCFrame(handle.CFrame)
+	editorModel.Parent = workspace
+
+	Selection:Set{handleProxy}
+
+	self.InUse = true
+	self.ProxyHandle = handleProxy
+	self.ProxyPart0 = rightHand
+
+	local cframeChanged = self:Connect("ReflectViewmodelGrip", handleProxy:GetPropertyChangedSignal("CFrame"))
+
+	ChangeHistoryService:SetWaypoint("Begin Viewmodel Grip Edit")
+
+	if plugin:GetSelectedRibbonTool() ~= Enum.RibbonTool.Move then
+		plugin:SelectRibbonTool("Move", UDim2.new())
+	end
+
+	-- Wait for the user to deselect
+	local function isSelected(target)
+		for _, item in ipairs(Selection:Get()) do
+			if item == target then
+				return true
+			end
+		end
+		return false
+	end
+
+	while self.InUse and isSelected(handleProxy) do
+		game:GetService("RunService").Heartbeat:Wait()
+	end
+
+	cframeChanged:Disconnect()
+	self.ProxyHandle = nil
+	self.ProxyPart0 = nil
+	self.InUse = false
+
+	ChangeHistoryService:SetWaypoint("End Viewmodel Grip Edit")
+
+	editorModel:Destroy()
 end
 
 -----------------------------------------------------------

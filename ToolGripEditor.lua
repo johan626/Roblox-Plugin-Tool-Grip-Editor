@@ -70,6 +70,9 @@ vpFrame.Size = UDim2.new(1, 0, 1, 0)
 vpFrame.CurrentCamera = camera
 vpFrame.Parent = preview
 
+local editorModeFrame = UI.create(require(uiDefs["EditorMode.model"]))
+editorModeFrame.Parent = preview
+
 local editButton = UI.create(require(uiDefs["EditButton.model"]))
 editButton.Parent = preview
 
@@ -79,7 +82,9 @@ liveSyncButton.Parent = preview
 local animationPreview = UI.create(require(uiDefs["AnimationPreview.model"]))
 animationPreview.Parent = preview
 
-local selectATool = UI.create(require(uiDefs["SelectATool.model"]))
+local selectAToolDef = require(uiDefs["SelectATool.model"])
+selectAToolDef.Properties.Position = UDim2.new(0.5, 0, 0.5, 40) -- Adjust position
+local selectATool = UI.create(selectAToolDef)
 selectATool.Parent = preview
 
 local ribbonTools = UI.create(require(uiDefs.RibbonTools))
@@ -339,10 +344,16 @@ local function onSelectionChanged()
 		end
 	end
 
-	local mounted = editor:BindTool(tool)
+	local mounted
+	if editor.EditorMode == "Character" then
+		mounted = editor:BindTool(tool)
+	else -- Viewmodel mode
+		mounted = editor:BindViewmodelTool(tool)
+	end
+
 	selectATool.Visible = (not mounted)
 	editButton.Visible = mounted
-	liveSyncButton.Visible = mounted
+	liveSyncButton.Visible = (mounted and editor.EditorMode == "Character") -- Hide on VM for now
 	animationPreview.Visible = mounted
 
 	-- Reset button style on new selection, since sync is always off initially
@@ -426,5 +437,32 @@ end
 updateButton()
 enabledChanged:Connect(updateButton)
 button.Click:Connect(onButtonClicked)
+
+do
+	local charModeButton = editorModeFrame:FindFirstChild("CharacterModeButton")
+	local vmModeButton = editorModeFrame:FindFirstChild("ViewmodelModeButton")
+
+	local function updateEditorModeButtons()
+		if editor.EditorMode == "Character" then
+			charModeButton.Style = Enum.ButtonStyle.RobloxRoundDefaultButton
+			vmModeButton.Style = Enum.ButtonStyle.RobloxRoundButton
+		else
+			charModeButton.Style = Enum.ButtonStyle.RobloxRoundButton
+			vmModeButton.Style = Enum.ButtonStyle.RobloxRoundDefaultButton
+		end
+	end
+
+	charModeButton.Activated:Connect(function()
+		editor:SetEditorMode("Character")
+		updateEditorModeButtons()
+		onSelectionChanged()
+	end)
+
+	vmModeButton.Activated:Connect(function()
+		editor:SetEditorMode("Viewmodel")
+		updateEditorModeButtons()
+		onSelectionChanged()
+	end)
+end
 
 ------------------------------------------------------------------------------------------------------

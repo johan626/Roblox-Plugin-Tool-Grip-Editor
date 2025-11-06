@@ -5,5 +5,6 @@ return {
 		Text = "",
 		Size = UDim2.new(1, 0, 1, 0),
 		BackgroundTransparency = 1,
+		ZIndex = 1,
 	},
 }

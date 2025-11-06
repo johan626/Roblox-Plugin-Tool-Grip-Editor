@@ -51,7 +51,7 @@ function ToolEditor:_createNewDummy(rigType)
 	self.RootPart = rootPart
 	self.Animator = animator
 
-	self:StartAnimations()
+	self:StartAnimations(dummy)
 end
 
 function ToolEditor:_generateViewmodelFromDummy()
@@ -92,6 +92,7 @@ function ToolEditor:_generateViewmodelFromDummy()
 	end
 
 	self.ViewmodelDummy = viewmodelDummy
+	self:StartAnimations(viewmodelDummy)
 	return viewmodelDummy
 end
 
@@ -108,8 +109,8 @@ function ToolEditor.new()
 
 			EditorMode = "Character", -- "Character" or "Viewmodel"
 
-			ProxyHandle = nil,
-			ProxyPart0 = nil,
+			ProxyAttachment = nil,
+			CustomAnimationTracks = {},
 		}
 
 	setmetatable(editor, ToolEditor)
@@ -211,6 +212,11 @@ function ToolEditor:ApplyDescription(hDesc)
 		local humanoid = self.Humanoid
 		humanoid:ApplyDescription(hDesc)
 	end
+
+	-- Regenerate the viewmodel dummy if it exists to keep it in sync
+	if self.ViewmodelDummy then
+		self:_generateViewmodelFromDummy()
+	end
 end
 
 function ToolEditor:SwitchRigType()
@@ -238,9 +244,17 @@ function ToolEditor:SwitchRigType()
 	return newRigType
 end
 
-function ToolEditor:StartAnimations()
+function ToolEditor:StartAnimations(targetDummy)
+	targetDummy = targetDummy or self.Dummy
+	if not targetDummy then return end
+
+	local humanoid = targetDummy:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then return end
+
 	local anims = Project:WaitForChild("Animations")[self.RigType]
-	local animator = self.Animator
 
 	for _,track in pairs(animator:GetPlayingAnimationTracks()) do
 		track:Stop()
@@ -258,7 +272,17 @@ end
 function ToolEditor:PlayAnimation(animationId)
 	self:StopCustomAnimation()
 
-	local animator = self.Animator
+	local animator
+	if self.EditorMode == "Viewmodel" and self.ViewmodelDummy then
+		animator = self.ViewmodelDummy:FindFirstChildOfClass("Humanoid"):FindFirstChildOfClass("Animator")
+	else
+		animator = self.Animator
+	end
+
+	if not animator then
+		return false, "Animator not found for current mode."
+	end
+
 	local success, animation = pcall(function()
 		local anim = Instance.new("Animation")
 		anim.AnimationId = animationId
@@ -279,7 +303,9 @@ function ToolEditor:PlayAnimation(animationId)
 		return false, "Failed to load animation. Check permissions and ID."
 	end
 
-	self.CustomAnimationTrack = track
+	if not self.CustomAnimationTracks then self.CustomAnimationTracks = {} end
+	self.CustomAnimationTracks[animator] = track
+
 	track.Looped = true
 	track:Play()
 
@@ -287,14 +313,19 @@ function ToolEditor:PlayAnimation(animationId)
 end
 
 function ToolEditor:StopCustomAnimation()
-	if self.CustomAnimationTrack then
-		self.CustomAnimationTrack:Stop()
-		self.CustomAnimationTrack:Destroy()
-		self.CustomAnimationTrack = nil
-	end
+	if not self.CustomAnimationTracks then return end
 
-	-- Restart the default animations
-	self:StartAnimations()
+	for animator, track in pairs(self.CustomAnimationTracks) do
+		if track then
+			track:Stop()
+			track:Destroy()
+		end
+	end
+	self.CustomAnimationTracks = {}
+
+	-- Restart the default animations on both dummies
+	self:StartAnimations(self.Dummy)
+	self:StartAnimations(self.ViewmodelDummy)
 end
 
 function ToolEditor:Connect(name, event)
@@ -341,11 +372,8 @@ function ToolEditor:ReflectGrip()
 end
 
 function ToolEditor:ReflectViewmodelGrip()
-	if self.ProxyHandle and self.ProxyPart0 and self.ViewModelWeld then
-		local worldCFrame = self.ProxyHandle.CFrame
-		local part0CFrame = self.ProxyPart0.CFrame
-		local newC1 = part0CFrame:ToObjectSpace(worldCFrame)
-		self.ViewModelWeld.C1 = newC1
+	if self.ProxyAttachment and self.ViewModelWeld then
+		self.ViewModelWeld.C1 = self.ProxyAttachment.CFrame
 	end
 end
 
@@ -700,6 +728,19 @@ function ToolEditor:BindViewmodelTool(tool)
 	local newHandle = handle:Clone()
 	newHandle.Parent = self.ViewmodelDummy
 
+	for _,descendant in ipairs(tool:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant ~= handle then
+			local partClone = descendant:Clone()
+			partClone.Parent = newHandle
+
+			local weld = Instance.new("Weld")
+			weld.Part0 = newHandle
+			weld.Part1 = partClone
+			weld.C0 = handle.CFrame:ToObjectSpace(descendant.CFrame)
+			weld.Parent = partClone
+		end
+	end
+
 	local viewModelWeld = Instance.new("Motor6D")
 	viewModelWeld.Name = "ViewModelWeld"
 	viewModelWeld.Part0 = rightHand
@@ -715,6 +756,7 @@ function ToolEditor:BindViewmodelTool(tool)
 	self.Handle = newHandle
 	self.ViewModelWeld = viewModelWeld
 	self.Tool = tool
+	self.DirectHandle = handle
 
 	return true
 end
@@ -811,11 +853,13 @@ function ToolEditor:EditGrip(plugin)
 end
 
 function ToolEditor:_editViewmodelGrip(plugin)
+	warn("[Debug] 1. Entering _editViewmodelGrip.")
 	local tool = self.Tool
 	local handle = self.Handle
 	local viewModelWeld = self.ViewModelWeld
 
 	if not (tool and handle and viewModelWeld) then
+		warn("[Debug] ABORTED: Missing critical variables.")
 		return
 	end
 
@@ -848,16 +892,29 @@ function ToolEditor:_editViewmodelGrip(plugin)
 	weldProxy.Parent = rightHand
 
 	editorModel.PrimaryPart = handleProxy
-	editorModel:SetPrimaryPartCFrame(handle.CFrame)
+	editorModel:SetPrimaryPartCFrame(self.DirectHandle.CFrame)
 	editorModel.Parent = workspace
 
-	Selection:Set{handleProxy}
+	local gripAttachmentProxy = Instance.new("Attachment")
+	gripAttachmentProxy.Name = "GripAttachment"
+	gripAttachmentProxy.CFrame = viewModelWeld.C1
+	gripAttachmentProxy.Parent = handleProxy
+
+	if tool:IsDescendantOf(workspace) then
+		handleProxy.Transparency = 0.75
+		for _, child in ipairs(handleProxy:GetChildren()) do
+			if child:IsA("Weld") then
+				child:Destroy()
+			end
+		end
+	end
+
+	Selection:Set{gripAttachmentProxy}
 
 	self.InUse = true
-	self.ProxyHandle = handleProxy
-	self.ProxyPart0 = rightHand
+	self.ProxyAttachment = gripAttachmentProxy
 
-	local cframeChanged = self:Connect("ReflectViewmodelGrip", handleProxy:GetPropertyChangedSignal("CFrame"))
+	local cframeChanged = self:Connect("ReflectViewmodelGrip", gripAttachmentProxy:GetPropertyChangedSignal("CFrame"))
 
 	ChangeHistoryService:SetWaypoint("Begin Viewmodel Grip Edit")
 
@@ -875,13 +932,12 @@ function ToolEditor:_editViewmodelGrip(plugin)
 		return false
 	end
 
-	while self.InUse and isSelected(handleProxy) do
+	while self.InUse and isSelected(gripAttachmentProxy) do
 		game:GetService("RunService").Heartbeat:Wait()
 	end
 
 	cframeChanged:Disconnect()
-	self.ProxyHandle = nil
-	self.ProxyPart0 = nil
+	self.ProxyAttachment = nil
 	self.InUse = false
 
 	ChangeHistoryService:SetWaypoint("End Viewmodel Grip Edit")

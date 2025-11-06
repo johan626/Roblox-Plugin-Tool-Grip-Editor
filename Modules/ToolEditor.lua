@@ -853,13 +853,11 @@ function ToolEditor:EditGrip(plugin)
 end
 
 function ToolEditor:_editViewmodelGrip(plugin)
-	warn("[Debug] 1. Entering _editViewmodelGrip.")
 	local tool = self.Tool
 	local handle = self.Handle
 	local viewModelWeld = self.ViewModelWeld
 
 	if not (tool and handle and viewModelWeld) then
-		warn("[Debug] ABORTED: Missing critical variables.")
 		return
 	end
 
@@ -876,72 +874,47 @@ function ToolEditor:_editViewmodelGrip(plugin)
 	end
 	ghostViewmodel.Parent = editorModel
 
-	local part0Name = (self.RigType == "R15") and "RightHand" or "Right Arm"
-	local rightHand = ghostViewmodel:FindFirstChild(part0Name, true)
+	editorModel.Parent = workspace
 
 	local handleProxy = handle:Clone()
 	handleProxy.Anchored = true
 	handleProxy.Parent = editorModel
-
-	local weldProxy = Instance.new("Motor6D")
-	weldProxy.Name = "ViewModelWeld"
-	weldProxy.Part0 = rightHand
-	weldProxy.Part1 = handleProxy
-	weldProxy.C0 = viewModelWeld.C0
-	weldProxy.C1 = viewModelWeld.C1
-	weldProxy.Parent = rightHand
-
-	editorModel.PrimaryPart = handleProxy
-	editorModel:SetPrimaryPartCFrame(self.DirectHandle.CFrame)
-	editorModel.Parent = workspace
 
 	local gripAttachmentProxy = Instance.new("Attachment")
 	gripAttachmentProxy.Name = "GripAttachment"
 	gripAttachmentProxy.CFrame = viewModelWeld.C1
 	gripAttachmentProxy.Parent = handleProxy
 
+	editorModel.PrimaryPart = handleProxy
+	editorModel:SetPrimaryPartCFrame(self.DirectHandle.CFrame)
+
 	if tool:IsDescendantOf(workspace) then
 		handleProxy.Transparency = 0.75
-		for _, child in ipairs(handleProxy:GetChildren()) do
-			if child:IsA("Weld") then
-				child:Destroy()
-			end
-		end
 	end
 
 	Selection:Set{gripAttachmentProxy}
-
 	self.InUse = true
 	self.ProxyAttachment = gripAttachmentProxy
 
 	local cframeChanged = self:Connect("ReflectViewmodelGrip", gripAttachmentProxy:GetPropertyChangedSignal("CFrame"))
 
-	ChangeHistoryService:SetWaypoint("Begin Viewmodel Grip Edit")
-
 	if plugin:GetSelectedRibbonTool() ~= Enum.RibbonTool.Move then
 		plugin:SelectRibbonTool("Move", UDim2.new())
 	end
 
-	-- Wait for the user to deselect
-	local function isSelected(target)
-		for _, item in ipairs(Selection:Get()) do
-			if item == target then
-				return true
-			end
-		end
-		return false
-	end
+	ChangeHistoryService:SetWaypoint("Begin Viewmodel Grip Edit")
 
-	while self.InUse and isSelected(gripAttachmentProxy) do
-		game:GetService("RunService").Heartbeat:Wait()
-	end
+	-- Wait for deselection
+	Selection.SelectionChanged:Wait()
 
+	gripAttachmentProxy.Parent = nil
+	ghostViewmodel.Parent = nil
 	cframeChanged:Disconnect()
+
 	self.ProxyAttachment = nil
 	self.InUse = false
 
 	ChangeHistoryService:SetWaypoint("End Viewmodel Grip Edit")
-
 	editorModel:Destroy()
 end
 

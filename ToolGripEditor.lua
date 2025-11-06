@@ -70,10 +70,21 @@ vpFrame.Size = UDim2.new(1, 0, 1, 0)
 vpFrame.CurrentCamera = camera
 vpFrame.Parent = preview
 
+local editorModeFrame = UI.create(require(uiDefs["EditorMode.model"]))
+editorModeFrame.Parent = preview
+
 local editButton = UI.create(require(uiDefs["EditButton.model"]))
 editButton.Parent = preview
 
-local selectATool = UI.create(require(uiDefs["SelectATool.model"]))
+local liveSyncButton = UI.create(require(uiDefs["LiveSyncButton.model"]))
+liveSyncButton.Parent = preview
+
+local animationPreview = UI.create(require(uiDefs["AnimationPreview.model"]))
+animationPreview.Parent = preview
+
+local selectAToolDef = require(uiDefs["SelectATool.model"])
+selectAToolDef.Properties.Position = UDim2.new(0.5, 0, 0.5, 40) -- Adjust position
+local selectATool = UI.create(selectAToolDef)
 selectATool.Parent = preview
 
 local ribbonTools = UI.create(require(uiDefs.RibbonTools))
@@ -178,6 +189,45 @@ updateTheme()
 editor:SetParent(vpFrame)
 editor:StartAnimations()
 
+local function loadUserAvatar()
+	local userId
+
+	local success, studioService = pcall(function()
+		return game:GetService("StudioService")
+	end)
+
+	if success and studioService then
+		local gotId, id = pcall(function()
+			return studioService:GetUserId()
+		end)
+		if gotId then
+			userId = id
+		end
+	end
+
+	if not userId then
+		warn("Tool Grip Editor: Could not automatically determine the user's ID to load their avatar.")
+		return
+	end
+
+	-- Now, load the description.
+	warn("Tool Grip Editor: Loading avatar for user ID:", userId)
+
+	local gotDesc, hDesc = pcall(function ()
+		return Players:GetHumanoidDescriptionFromUserId(userId)
+	end)
+
+	if not gotDesc then
+		warn("Tool Grip Editor: Could not get a HumanoidDescription for user ID", userId, "at this time!")
+		return
+	end
+
+	editor:ApplyDescription(hDesc)
+	warn("Tool Grip Editor: Avatar loaded successfully!")
+end
+
+loadUserAvatar()
+
 Studio.ThemeChanged:Connect(updateTheme)
 RunService.Heartbeat:Connect(updateWindow)
 
@@ -270,6 +320,8 @@ end
 input.FocusLost:Connect(onFocusLost)
 inputSink.InputBegan:Connect(onInputBegan)
 
+
+
 ------------------------------------------------------------------------------------------------------
 -- Tool Mounting
 ------------------------------------------------------------------------------------------------------
@@ -294,9 +346,20 @@ local function onSelectionChanged()
 		end
 	end
 
-	local mounted = editor:BindTool(tool)
+	local mounted
+	if editor.EditorMode == "Character" then
+		mounted = editor:BindTool(tool)
+	else -- Viewmodel mode
+		mounted = editor:BindViewmodelTool(tool)
+	end
+
 	selectATool.Visible = (not mounted)
 	editButton.Visible = mounted
+	liveSyncButton.Visible = (mounted and editor.EditorMode == "Character") -- Hide on VM for now
+	animationPreview.Visible = mounted
+
+	-- Reset button style on new selection, since sync is always off initially
+	liveSyncButton.Style = Enum.ButtonStyle.RobloxRoundButton
 end
 
 local function onEditActivated()
@@ -316,6 +379,34 @@ end
 
 editButton.Activated:Connect(onEditActivated)
 Selection.SelectionChanged:Connect(onSelectionChanged)
+
+liveSyncButton.Activated:Connect(function()
+	local isActive = editor:ToggleLiveSync()
+	if isActive then
+		liveSyncButton.Style = Enum.ButtonStyle.RobloxRoundDefaultButton
+	else
+		liveSyncButton.Style = Enum.ButtonStyle.RobloxRoundButton
+	end
+end)
+
+do
+	local animInput = animationPreview:FindFirstChild("AnimIdInput")
+	local playButton = animationPreview:FindFirstChild("PlayButton")
+	local stopButton = animationPreview:FindFirstChild("StopButton")
+
+	playButton.Activated:Connect(function()
+		local animId = animInput.Text
+		if animId and animId ~= "" then
+			editor:PlayAnimation(animId)
+		else
+			warn("Animation ID is empty!")
+		end
+	end)
+
+	stopButton.Activated:Connect(function()
+		editor:StopCustomAnimation()
+	end)
+end
 
 ------------------------------------------------------------------------------------------------------
 -- Buttons
@@ -348,5 +439,32 @@ end
 updateButton()
 enabledChanged:Connect(updateButton)
 button.Click:Connect(onButtonClicked)
+
+do
+	local charModeButton = editorModeFrame:FindFirstChild("CharacterModeButton")
+	local vmModeButton = editorModeFrame:FindFirstChild("ViewmodelModeButton")
+
+	local function updateEditorModeButtons()
+		if editor.EditorMode == "Character" then
+			charModeButton.Style = Enum.ButtonStyle.RobloxRoundDefaultButton
+			vmModeButton.Style = Enum.ButtonStyle.RobloxRoundButton
+		else
+			charModeButton.Style = Enum.ButtonStyle.RobloxRoundButton
+			vmModeButton.Style = Enum.ButtonStyle.RobloxRoundDefaultButton
+		end
+	end
+
+	charModeButton.Activated:Connect(function()
+		editor:SetEditorMode("Character")
+		updateEditorModeButtons()
+		onSelectionChanged()
+	end)
+
+	vmModeButton.Activated:Connect(function()
+		editor:SetEditorMode("Viewmodel")
+		updateEditorModeButtons()
+		onSelectionChanged()
+	end)
+end
 
 ------------------------------------------------------------------------------------------------------

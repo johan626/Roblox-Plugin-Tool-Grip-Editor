@@ -823,10 +823,20 @@ function ToolEditor:_editViewmodelGrip(plugin)
 	editorModel.Name = "Viewmodel Grip Editor"
 	editorModel.Archivable = false
 
-	local rightHand = viewModelWeld.Part0:Clone()
-	rightHand.Parent = editorModel
+	local ghostViewmodel = self.ViewmodelDummy:Clone()
+	ghostViewmodel.Name = "GhostViewmodel"
+	for _, part in ipairs(ghostViewmodel:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+		end
+	end
+	ghostViewmodel.Parent = editorModel
+
+	local part0Name = (self.RigType == "R15") and "RightHand" or "Right Arm"
+	local rightHand = ghostViewmodel:FindFirstChild(part0Name, true)
 
 	local handleProxy = handle:Clone()
+	handleProxy.Anchored = true
 	handleProxy.Parent = editorModel
 
 	local weldProxy = Instance.new("Motor6D")
